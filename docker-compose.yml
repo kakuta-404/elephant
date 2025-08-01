@@ -20,3 +20,36 @@ services:
     depends_on:
       - spark-master
     network_mode: "host"
+  namenode:
+    image: bde2020/hadoop-namenode:2.0.0-hadoop3.2.1-java8
+    container_name: namenode
+    hostname: namenode
+    ports:
+      - "9870:9870"  
+      - "9000:9000"  
+    environment:
+      - CLUSTER_NAME=test-cluster 
+      - JAVA_HOME=/usr/lib/jvm/java-8-openjdk-amd64 
+    env_file:
+      - parquet-loader/hdfs.env 
+
+  datanode:
+    image: bde2020/hadoop-datanode:2.0.0-hadoop3.2.1-java8
+    container_name: datanode
+    hostname: datanode
+    depends_on:
+      - namenode  
+    environment:
+      - CORE_CONF_fs_defaultFS=hdfs://namenode:9000  
+    env_file:
+      - parquet-loader/hdfs.env 
+  downloader:
+    build:
+      context: ./parquet-loader
+      dockerfile: Dockerfile
+    container_name: hdfs-ingestor
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    depends_on:
+      - namenode
+      - datanode

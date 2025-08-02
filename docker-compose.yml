@@ -1,68 +1,80 @@
 services:
-  spark-master:
-    image: apache/spark:3.3.1
-    environment:
-      - SPARK_MODE=master
-    ports:
-      - 8080:8080
-      - 7077:7077
-    command: ["/opt/spark/bin/spark-class", "org.apache.spark.deploy.master.Master"]
-    network_mode: "host"
+  # spark-master:
+  #   image: apache/spark:3.3.1
+  #   environment:
+  #     - SPARK_MODE=master
+  #   ports:
+  #     - 8080:8080
+  #     - 7077:7077
+  #   command: ["/opt/spark/bin/spark-class", "org.apache.spark.deploy.master.Master"]
+  #   network_mode: "host"
 
-  spark-worker:
-    image: apache/spark:3.3.1
-    environment:
-      - SPARK_MODE=worker
-      - SPARK_MASTER_URL=spark://localhost:7077
-    volumes:
-      - ./spark-worker-workdir:/opt/spark/work
-    command: ["/opt/spark/bin/spark-class", "org.apache.spark.deploy.worker.Worker", "spark://localhost:7077"]
-    depends_on:
-      - spark-master
-    network_mode: "host"
+  # spark-worker:
+  #   image: apache/spark:3.3.1
+  #   environment:
+  #     - SPARK_MODE=worker
+  #     - SPARK_MASTER_URL=spark://localhost:7077
+  #   volumes:
+  #     - ./spark-worker-workdir:/opt/spark/work
+  #   command: ["/opt/spark/bin/spark-class", "org.apache.spark.deploy.worker.Worker", "spark://localhost:7077"]
+  #   depends_on:
+  #     - spark-master
+  #   network_mode: "host"
 
 
   zookeeper1:
     image: zookeeper:3.8
     container_name: zookeeper1
-    ports:
-      - "2181:2181" 
-      - "2888:2888"
-      - "3888:3888" 
-      - "8080:8080" 
     environment:
       ZOO_MY_ID: "1"
-      ZOO_SERVERS: "server.1=zookeeper1:2888:3888;server.2=zookeeper2:2888:3888;server.3=zookeeper3:2888:3888"
+      ZOO_SERVERS: |
+        server.1=zookeeper1:2888:3888
+        server.2=zookeeper2:2888:3888
+        server.3=zookeeper3:2888:3888
+      ZOO_CFG_EXTRA: |
+        clientPort=2181
+    ports:
+      - "2181:2181"
+      - "2888:2888"
+      - "3888:3888"
     networks:
-      - hadoop
+      - hadoopNet
 
   zookeeper2:
     image: zookeeper:3.8
     container_name: zookeeper2
-    ports: 
+    environment:
+      ZOO_MY_ID: "2"
+      ZOO_SERVERS: |
+        server.1=zookeeper1:2888:3888
+        server.2=zookeeper2:2888:3888
+        server.3=zookeeper3:2888:3888
+      ZOO_CFG_EXTRA: |
+        clientPort=2181
+    ports:
       - "2182:2181"
       - "2889:2888"
       - "3889:3888"
-      - "8081:8080"
-    environment:
-      ZOO_MY_ID: "2"
-      ZOO_SERVERS: "server.1=zookeeper1:2888:3888;server.2=zookeeper2:2888:3888;server.3=zookeeper3:2888:3888"
     networks:
-      - hadoop
+      - hadoopNet
 
   zookeeper3:
     image: zookeeper:3.8
     container_name: zookeeper3
-    ports: 
+    environment:
+      ZOO_MY_ID: "3"
+      ZOO_SERVERS: |
+        server.1=zookeeper1:2888:3888
+        server.2=zookeeper2:2888:3888
+        server.3=zookeeper3:2888:3888
+      ZOO_CFG_EXTRA: |
+        clientPort=2181
+    ports:
       - "2183:2181"
       - "2890:2888"
       - "3890:3888"
-      - "8082:8080"
-    environment:
-      ZOO_MY_ID: "3"
-      ZOO_SERVERS: "server.1=zookeeper1:2888:3888;server.2=zookeeper2:2888:3888;server.3=zookeeper3:2888:3888"
     networks:
-      - hadoop
+      - hadoopNet
  # adding the service precondition to make sure that the namenode will make up after the journal nodes 
   namenode1:
     image: bde2020/hadoop-namenode:2.0.0-hadoop3.2.1-java8
@@ -73,14 +85,31 @@ services:
     environment:
       - SERVICE_PRECONDITION=journalnode1:8485 journalnode2:8485 journalnode3:8485 zookeeper1:2181 zookeeper2:2181 zookeeper3:2181
       - JAVA_HOME=/usr/lib/jvm/java-8-openjdk-amd64 
+      - ROLE=active
     env_file:
       - HDFSconfigure.env 
     networks:
-      - hadoop
+      - hadoopNet
     depends_on:
       - journalnode1
       - journalnode2
-      - journalnode3  
+      - journalnode3 
+      - zookeeper1
+      - zookeeper2
+      - zookeeper3 
+    entrypoint: >
+      bash -c '
+        if [ "$ROLE" = "active" ]; then
+          
+          if [ ! -d /hadoop/dfs/name/current ]; then
+            hdfs namenode -format "$CLUSTER_NAME" -force
+          fi
+        else
+          
+          hdfs namenode -bootstrapStandby -force -nonInteractive
+        fi
+        exec hdfs namenode
+      '
 
   namenode2:
     image: bde2020/hadoop-namenode:2.0.0-hadoop3.2.1-java8
@@ -91,15 +120,31 @@ services:
     environment:
       - SERVICE_PRECONDITION=journalnode1:8485 journalnode2:8485 journalnode3:8485 zookeeper1:2181 zookeeper2:2181 zookeeper3:2181
       - JAVA_HOME=/usr/lib/jvm/java-8-openjdk-amd64 
+      - ROLE=standby
     env_file:
       - HDFSconfigure.env
     networks:
-      - hadoop
+      - hadoopNet
     depends_on:
       - journalnode1
       - journalnode2
-      - journalnode3  
+      - journalnode3 
+      - zookeeper1
+      - zookeeper2
+      - zookeeper3 
+    entrypoint: >
+      bash -c '
+        if [ "$ROLE" = "active" ]; then
+      
+          if [ ! -d /hadoop/dfs/name/current ]; then
+            hdfs namenode -format "$CLUSTER_NAME" -force
+          fi
+        else
 
+          hdfs namenode -bootstrapStandby -force -nonInteractive
+        fi
+        exec hdfs namenode
+      '
 
   journalnode1:
     image: bde2020/hadoop-base:2.0.0-hadoop3.2.1-java8
@@ -110,7 +155,7 @@ services:
     env_file:
       - HDFSconfigure.env
     networks:
-      - hadoop
+      - hadoopNet
 
   journalnode2:
     image: bde2020/hadoop-base:2.0.0-hadoop3.2.1-java8
@@ -121,7 +166,7 @@ services:
     env_file:
       - HDFSconfigure.env
     networks:
-      - hadoop
+      - hadoopNet
 
   journalnode3:
     image: bde2020/hadoop-base:2.0.0-hadoop3.2.1-java8
@@ -132,7 +177,7 @@ services:
     env_file:
       - HDFSconfigure.env
     networks:
-      - hadoop
+      - hadoopNet
 
   datanode1:
     image: bde2020/hadoop-datanode:2.0.0-hadoop3.2.1-java8
@@ -143,7 +188,7 @@ services:
     env_file:
       - HDFSconfigure.env
     networks:
-      - hadoop 
+      - hadoopNet 
   
   datanode2:
     image: bde2020/hadoop-datanode:2.0.0-hadoop3.2.1-java8
@@ -154,7 +199,7 @@ services:
     env_file:
       - HDFSconfigure.env 
     networks:
-      - hadoop
+      - hadoopNet
   
   datanode3: 
     image: bde2020/hadoop-datanode:2.0.0-hadoop3.2.1-java8
@@ -165,7 +210,7 @@ services:
     env_file:
       - HDFSconfigure.env 
     networks:
-      - hadoop
+      - hadoopNet
   
   zkfc1:
     image: bde2020/hadoop-base:2.0.0-hadoop3.2.1-java8
@@ -174,7 +219,7 @@ services:
     env_file:
       - HDFSconfigure.env
     networks:
-      - hadoop
+      - hadoopNet
     depends_on:
       - namenode1
       - zookeeper1
@@ -189,9 +234,9 @@ services:
     env_file:
       - HDFSconfigure.env
     networks:
-      - hadoop
+      - hadoopNet
     depends_on:
-      - namenode1
+      - namenode2
       - zookeeper1
       - zookeeper2
       - zookeeper3 
@@ -214,5 +259,5 @@ services:
       - datanode3
 
 networks:
-  hadoop : 
+  hadoopNet : 
     driver : bridge

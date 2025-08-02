@@ -86,8 +86,7 @@ services:
       - SERVICE_PRECONDITION=journalnode1:8485 journalnode2:8485 journalnode3:8485 zookeeper1:2181 zookeeper2:2181 zookeeper3:2181
       - JAVA_HOME=/usr/lib/jvm/java-8-openjdk-amd64 
       - ROLE=active
-    env_file:
-      - HDFSconfigure.env 
+      - CLUSTER_NAME=test_cluster
     networks:
       - hadoopNet
     depends_on:
@@ -97,16 +96,15 @@ services:
       - zookeeper1
       - zookeeper2
       - zookeeper3 
-    entrypoint: >
+    volumes:
+      - ./conf:/etc/hadoop:ro
+    entrypoint: |
       bash -c '
-        if [ "$ROLE" = "active" ]; then
-          
-          if [ ! -d /hadoop/dfs/name/current ]; then
-            hdfs namenode -format "$CLUSTER_NAME" -force
-          fi
+        set -euo pipefail
+        if [ "$$ROLE" = "active" ]; then 
+          [ ! -d /hadoop/dfs/name/current ] && hdfs namenode -format "$$CLUSTER_NAME" -force
         else
-          
-          hdfs namenode -bootstrapStandby -force -nonInteractive
+          [ ! -d /hadoop/dfs/name/current ] && hdfs namenode -bootstrapStandby -force -nonInteractive
         fi
         exec hdfs namenode
       '
@@ -121,8 +119,7 @@ services:
       - SERVICE_PRECONDITION=journalnode1:8485 journalnode2:8485 journalnode3:8485 zookeeper1:2181 zookeeper2:2181 zookeeper3:2181
       - JAVA_HOME=/usr/lib/jvm/java-8-openjdk-amd64 
       - ROLE=standby
-    env_file:
-      - HDFSconfigure.env
+      - CLUSTER_NAME=test_cluster
     networks:
       - hadoopNet
     depends_on:
@@ -132,19 +129,19 @@ services:
       - zookeeper1
       - zookeeper2
       - zookeeper3 
-    entrypoint: >
+    volumes:
+      - ./conf:/etc/hadoop:ro
+    entrypoint: |
       bash -c '
-        if [ "$ROLE" = "active" ]; then
-      
-          if [ ! -d /hadoop/dfs/name/current ]; then
-            hdfs namenode -format "$CLUSTER_NAME" -force
-          fi
+        set -euo pipefail
+        if [ "$$ROLE" = "active" ]; then 
+          [ ! -d /hadoop/dfs/name/current ] && hdfs namenode -format "$$CLUSTER_NAME" -force
         else
-
-          hdfs namenode -bootstrapStandby -force -nonInteractive
+          [ ! -d /hadoop/dfs/name/current ] && hdfs namenode -bootstrapStandby -force -nonInteractive
         fi
         exec hdfs namenode
       '
+
 
   journalnode1:
     image: bde2020/hadoop-base:2.0.0-hadoop3.2.1-java8
@@ -152,10 +149,10 @@ services:
     command: ["hdfs","journalnode"]
     ports:
       - "8485:8485"
-    env_file:
-      - HDFSconfigure.env
     networks:
       - hadoopNet
+    volumes:
+      - ./conf:/etc/hadoop:ro
 
   journalnode2:
     image: bde2020/hadoop-base:2.0.0-hadoop3.2.1-java8
@@ -163,10 +160,10 @@ services:
     command: ["hdfs","journalnode"]
     ports:
       - "8486:8485"
-    env_file:
-      - HDFSconfigure.env
     networks:
       - hadoopNet
+    volumes:
+      - ./conf:/etc/hadoop:ro
 
   journalnode3:
     image: bde2020/hadoop-base:2.0.0-hadoop3.2.1-java8
@@ -174,10 +171,10 @@ services:
     command: ["hdfs","journalnode"]
     ports:
       - "8487:8485"
-    env_file:
-      - HDFSconfigure.env
     networks:
       - hadoopNet
+    volumes:
+      - ./conf:/etc/hadoop:ro
 
   datanode1:
     image: bde2020/hadoop-datanode:2.0.0-hadoop3.2.1-java8
@@ -185,10 +182,10 @@ services:
     depends_on:
       - namenode1
       - namenode2
-    env_file:
-      - HDFSconfigure.env
     networks:
       - hadoopNet 
+    volumes:
+      - ./conf:/etc/hadoop:ro 
   
   datanode2:
     image: bde2020/hadoop-datanode:2.0.0-hadoop3.2.1-java8
@@ -196,10 +193,10 @@ services:
     depends_on:
       - namenode1
       - namenode2  
-    env_file:
-      - HDFSconfigure.env 
     networks:
       - hadoopNet
+    volumes:
+      - ./conf:/etc/hadoop:ro
   
   datanode3: 
     image: bde2020/hadoop-datanode:2.0.0-hadoop3.2.1-java8
@@ -207,17 +204,15 @@ services:
     depends_on:
       - namenode1
       - namenode2  
-    env_file:
-      - HDFSconfigure.env 
     networks:
       - hadoopNet
+    volumes:
+      - ./conf:/etc/hadoop:ro
   
   zkfc1:
     image: bde2020/hadoop-base:2.0.0-hadoop3.2.1-java8
     container_name: zkfc1
     command: ["hdfs", "zkfc"]
-    env_file:
-      - HDFSconfigure.env
     networks:
       - hadoopNet
     depends_on:
@@ -225,14 +220,14 @@ services:
       - zookeeper1
       - zookeeper2
       - zookeeper3
+    volumes:
+      - ./conf:/etc/hadoop:ro
 
 
   zkfc2:
     image: bde2020/hadoop-base:2.0.0-hadoop3.2.1-java8
     container_name: zkfc2
     command: ["hdfs", "zkfc"]
-    env_file:
-      - HDFSconfigure.env
     networks:
       - hadoopNet
     depends_on:
@@ -240,6 +235,8 @@ services:
       - zookeeper1
       - zookeeper2
       - zookeeper3 
+    volumes:
+      - ./conf:/etc/hadoop:ro
 
   downloader:
     build:
@@ -257,7 +254,13 @@ services:
       - datanode1
       - datanode2
       - datanode3
-
+  
+  # debug:
+  #   image: busybox
+  #   command: ["ls", "-l", "/opt/hadoop/etc/hadoop"]
+  #   volumes:
+  #     - ./conf:/opt/hadoop/etc/hadoop:ro
+      
 networks:
   hadoopNet : 
     driver : bridge

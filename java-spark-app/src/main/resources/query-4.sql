@@ -1,0 +1,1 @@
+SELECT MAX(tip_amount), datetrunc('day', tpep_pickup_datetime) d FROM data GROUP BY d;

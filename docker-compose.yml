@@ -10,6 +10,7 @@ services:
       - "7077:7077"
     volumes:
       - ./spark-conf:/opt/hadoop/etc/hadoop:ro
+      - ./java-spark-app/target/:/opt/spark-app
     networks: [bigdata]
 
   spark-worker-1:

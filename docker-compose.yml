@@ -80,11 +80,11 @@ services:
     image: bde2020/hadoop-namenode:2.0.0-hadoop3.2.1-java8
     container_name: namenode1
     ports:
-      - "9870:9870"  
-      - "9000:9000"  
+      - "9870:9870"
+      - "9000:9000"
     environment:
       - SERVICE_PRECONDITION=journalnode1:8485 journalnode2:8485 journalnode3:8485 zookeeper1:2181 zookeeper2:2181 zookeeper3:2181
-      - JAVA_HOME=/usr/lib/jvm/java-8-openjdk-amd64 
+      - JAVA_HOME=/usr/lib/jvm/java-8-openjdk-amd64
       - ROLE=active
       - CLUSTER_NAME=test_cluster
     networks:
@@ -92,32 +92,59 @@ services:
     depends_on:
       - journalnode1
       - journalnode2
-      - journalnode3 
+      - journalnode3
       - zookeeper1
       - zookeeper2
-      - zookeeper3 
+      - zookeeper3
     volumes:
       - ./conf:/etc/hadoop:ro
     entrypoint: |
       bash -c '
         set -euo pipefail
+
+        # Format or bootstrap NameNode
         if [ "$$ROLE" = "active" ]; then 
           [ ! -d /hadoop/dfs/name/current ] && hdfs namenode -format "$$CLUSTER_NAME" -force
         else
           [ ! -d /hadoop/dfs/name/current ] && hdfs namenode -bootstrapStandby -force -nonInteractive
         fi
-        exec hdfs namenode
+
+        # Start NameNode in background
+        hdfs namenode &
+
+        # Wait for NameNode to come up
+        sleep 15
+
+        # Only on active NameNode, format ZooKeeper once
+        if [ "$$ROLE" = "active" ]; then
+          echo "Formatting ZooKeeper for HA (one-time setup)..."
+          # Use a marker file to ensure formatZK runs only once
+          if [ ! -f /hadoop/dfs/name/zk_formatted ]; then
+            hdfs zkfc -formatZK -nonInteractive
+            # Create marker file to prevent re-formatting
+            mkdir -p /hadoop/dfs/name && touch /hadoop/dfs/name/zk_formatted
+          else
+            echo "ZooKeeper already formatted. Skipping hdfs zkfc -formatZK."
+          fi
+        fi
+
+        # Start ZKFC
+        echo "Starting ZKFC..."
+        hdfs zkfc
+
+        # Keep container alive
+        wait
       '
 
   namenode2:
     image: bde2020/hadoop-namenode:2.0.0-hadoop3.2.1-java8
     container_name: namenode2
     ports:
-      - "9871:9870"  
-      - "9001:9000"  
+      - "9871:9870"
+      - "9001:9000"
     environment:
       - SERVICE_PRECONDITION=journalnode1:8485 journalnode2:8485 journalnode3:8485 zookeeper1:2181 zookeeper2:2181 zookeeper3:2181
-      - JAVA_HOME=/usr/lib/jvm/java-8-openjdk-amd64 
+      - JAVA_HOME=/usr/lib/jvm/java-8-openjdk-amd64
       - ROLE=standby
       - CLUSTER_NAME=test_cluster
     networks:
@@ -125,23 +152,32 @@ services:
     depends_on:
       - journalnode1
       - journalnode2
-      - journalnode3 
+      - journalnode3
       - zookeeper1
       - zookeeper2
-      - zookeeper3 
+      - zookeeper3
     volumes:
       - ./conf:/etc/hadoop:ro
     entrypoint: |
       bash -c '
         set -euo pipefail
+
         if [ "$$ROLE" = "active" ]; then 
           [ ! -d /hadoop/dfs/name/current ] && hdfs namenode -format "$$CLUSTER_NAME" -force
         else
           [ ! -d /hadoop/dfs/name/current ] && hdfs namenode -bootstrapStandby -force -nonInteractive
         fi
-        exec hdfs namenode
-      '
 
+        hdfs namenode &
+
+        sleep 15
+
+        # No formatZK here — only namenode1 runs it
+        echo "Starting ZKFC..."
+        hdfs zkfc
+
+        wait
+      '
 
   journalnode1:
     image: bde2020/hadoop-base:2.0.0-hadoop3.2.1-java8

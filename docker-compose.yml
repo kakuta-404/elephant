@@ -1,48 +1,279 @@
 services:
-  spark-master:
-    image: apache/spark:3.3.1
-    environment:
-      - SPARK_MODE=master
-    ports:
-      - 8080:8080
-      - 7077:7077
-    command: ["/opt/spark/bin/spark-class", "org.apache.spark.deploy.master.Master"]
-    network_mode: "host"
+  # spark-master:
+  #   image: apache/spark:3.3.1
+  #   environment:
+  #     - SPARK_MODE=master
+  #   ports:
+  #     - 8080:8080
+  #     - 7077:7077
+  #   command: ["/opt/spark/bin/spark-class", "org.apache.spark.deploy.master.Master"]
+  #   network_mode: "host"
 
-  spark-worker:
-    image: apache/spark:3.3.1
+  # spark-worker:
+  #   image: apache/spark:3.3.1
+  #   environment:
+  #     - SPARK_MODE=worker
+  #     - SPARK_MASTER_URL=spark://localhost:7077
+  #   volumes:
+  #     - ./spark-worker-workdir:/opt/spark/work
+  #   command: ["/opt/spark/bin/spark-class", "org.apache.spark.deploy.worker.Worker", "spark://localhost:7077"]
+  #   depends_on:
+  #     - spark-master
+  #   network_mode: "host"
+
+
+  zookeeper1:
+    image: zookeeper:3.8
+    container_name: zookeeper1
     environment:
-      - SPARK_MODE=worker
-      - SPARK_MASTER_URL=spark://localhost:7077
-    volumes:
-      - ./spark-worker-workdir:/opt/spark/work
-    command: ["/opt/spark/bin/spark-class", "org.apache.spark.deploy.worker.Worker", "spark://localhost:7077"]
-    depends_on:
-      - spark-master
-    network_mode: "host"
-  namenode:
+      ZOO_MY_ID: "1"
+      ZOO_SERVERS: |
+        server.1=zookeeper1:2888:3888
+        server.2=zookeeper2:2888:3888
+        server.3=zookeeper3:2888:3888
+      ZOO_CFG_EXTRA: |
+        clientPort=2181
+    ports:
+      - "2181:2181"
+      - "2888:2888"
+      - "3888:3888"
+    networks:
+      - hadoopNet
+
+  zookeeper2:
+    image: zookeeper:3.8
+    container_name: zookeeper2
+    environment:
+      ZOO_MY_ID: "2"
+      ZOO_SERVERS: |
+        server.1=zookeeper1:2888:3888
+        server.2=zookeeper2:2888:3888
+        server.3=zookeeper3:2888:3888
+      ZOO_CFG_EXTRA: |
+        clientPort=2181
+    ports:
+      - "2182:2181"
+      - "2889:2888"
+      - "3889:3888"
+    networks:
+      - hadoopNet
+
+  zookeeper3:
+    image: zookeeper:3.8
+    container_name: zookeeper3
+    environment:
+      ZOO_MY_ID: "3"
+      ZOO_SERVERS: |
+        server.1=zookeeper1:2888:3888
+        server.2=zookeeper2:2888:3888
+        server.3=zookeeper3:2888:3888
+      ZOO_CFG_EXTRA: |
+        clientPort=2181
+    ports:
+      - "2183:2181"
+      - "2890:2888"
+      - "3890:3888"
+    networks:
+      - hadoopNet
+ # adding the service precondition to make sure that the namenode will make up after the journal nodes 
+  namenode1:
     image: bde2020/hadoop-namenode:2.0.0-hadoop3.2.1-java8
-    container_name: namenode
-    hostname: namenode
+    container_name: namenode1
     ports:
-      - "9870:9870"  
-      - "9000:9000"  
+      - "9870:9870"
+      - "9000:9000"
     environment:
-      - CLUSTER_NAME=test-cluster 
-      - JAVA_HOME=/usr/lib/jvm/java-8-openjdk-amd64 
-    env_file:
-      - parquet-loader/hdfs.env 
-
-  datanode:
-    image: bde2020/hadoop-datanode:2.0.0-hadoop3.2.1-java8
-    container_name: datanode
-    hostname: datanode
+      - SERVICE_PRECONDITION=journalnode1:8485 journalnode2:8485 journalnode3:8485 zookeeper1:2181 zookeeper2:2181 zookeeper3:2181
+      - JAVA_HOME=/usr/lib/jvm/java-8-openjdk-amd64
+      - ROLE=active
+      - CLUSTER_NAME=test_cluster
+    networks:
+      - hadoopNet
     depends_on:
-      - namenode  
+      - journalnode1
+      - journalnode2
+      - journalnode3
+      - zookeeper1
+      - zookeeper2
+      - zookeeper3
+    volumes:
+      - ./conf:/etc/hadoop:ro
+    entrypoint: |
+      bash -c '
+        set -euo pipefail
+
+        # Format or bootstrap NameNode
+        if [ "$$ROLE" = "active" ]; then 
+          [ ! -d /hadoop/dfs/name/current ] && hdfs namenode -format "$$CLUSTER_NAME" -force
+        else
+          [ ! -d /hadoop/dfs/name/current ] && hdfs namenode -bootstrapStandby -force -nonInteractive
+        fi
+
+        # Start NameNode in background
+        hdfs namenode &
+
+        # Wait for NameNode to come up
+        sleep 15
+
+        # Only on active NameNode, format ZooKeeper once
+        if [ "$$ROLE" = "active" ]; then
+          echo "Formatting ZooKeeper for HA (one-time setup)..."
+          # Use a marker file to ensure formatZK runs only once
+          if [ ! -f /hadoop/dfs/name/zk_formatted ]; then
+            hdfs zkfc -formatZK -nonInteractive
+            # Create marker file to prevent re-formatting
+            mkdir -p /hadoop/dfs/name && touch /hadoop/dfs/name/zk_formatted
+          else
+            echo "ZooKeeper already formatted. Skipping hdfs zkfc -formatZK."
+          fi
+        fi
+
+        # Start ZKFC
+        echo "Starting ZKFC..."
+        hdfs zkfc
+
+        # Keep container alive
+        wait
+      '
+
+  namenode2:
+    image: bde2020/hadoop-namenode:2.0.0-hadoop3.2.1-java8
+    container_name: namenode2
+    ports:
+      - "9871:9870"
+      - "9001:9000"
     environment:
-      - CORE_CONF_fs_defaultFS=hdfs://namenode:9000  
-    env_file:
-      - parquet-loader/hdfs.env 
+      - SERVICE_PRECONDITION=journalnode1:8485 journalnode2:8485 journalnode3:8485 zookeeper1:2181 zookeeper2:2181 zookeeper3:2181
+      - JAVA_HOME=/usr/lib/jvm/java-8-openjdk-amd64
+      - ROLE=standby
+      - CLUSTER_NAME=test_cluster
+    networks:
+      - hadoopNet
+    depends_on:
+      - journalnode1
+      - journalnode2
+      - journalnode3
+      - zookeeper1
+      - zookeeper2
+      - zookeeper3
+    volumes:
+      - ./conf:/etc/hadoop:ro
+    entrypoint: |
+      bash -c '
+        set -euo pipefail
+
+        if [ "$$ROLE" = "active" ]; then 
+          [ ! -d /hadoop/dfs/name/current ] && hdfs namenode -format "$$CLUSTER_NAME" -force
+        else
+          [ ! -d /hadoop/dfs/name/current ] && hdfs namenode -bootstrapStandby -force -nonInteractive
+        fi
+
+        hdfs namenode &
+
+        sleep 15
+
+        # No formatZK here — only namenode1 runs it
+        echo "Starting ZKFC..."
+        hdfs zkfc
+
+        wait
+      '
+
+  journalnode1:
+    image: bde2020/hadoop-base:2.0.0-hadoop3.2.1-java8
+    container_name: journalnode1
+    command: ["hdfs","journalnode"]
+    ports:
+      - "8485:8485"
+    networks:
+      - hadoopNet
+    volumes:
+      - ./conf:/etc/hadoop:ro
+
+  journalnode2:
+    image: bde2020/hadoop-base:2.0.0-hadoop3.2.1-java8
+    container_name: journalnode2
+    command: ["hdfs","journalnode"]
+    ports:
+      - "8486:8485"
+    networks:
+      - hadoopNet
+    volumes:
+      - ./conf:/etc/hadoop:ro
+
+  journalnode3:
+    image: bde2020/hadoop-base:2.0.0-hadoop3.2.1-java8
+    container_name: journalnode3
+    command: ["hdfs","journalnode"]
+    ports:
+      - "8487:8485"
+    networks:
+      - hadoopNet
+    volumes:
+      - ./conf:/etc/hadoop:ro
+
+  datanode1:
+    image: bde2020/hadoop-datanode:2.0.0-hadoop3.2.1-java8
+    container_name: datanode1
+    depends_on:
+      - namenode1
+      - namenode2
+    networks:
+      - hadoopNet 
+    volumes:
+      - ./conf:/etc/hadoop:ro 
+  
+  datanode2:
+    image: bde2020/hadoop-datanode:2.0.0-hadoop3.2.1-java8
+    container_name: datanode2
+    depends_on:
+      - namenode1
+      - namenode2  
+    networks:
+      - hadoopNet
+    volumes:
+      - ./conf:/etc/hadoop:ro
+  
+  datanode3: 
+    image: bde2020/hadoop-datanode:2.0.0-hadoop3.2.1-java8
+    container_name: datanode3
+    depends_on:
+      - namenode1
+      - namenode2  
+    networks:
+      - hadoopNet
+    volumes:
+      - ./conf:/etc/hadoop:ro
+  
+  zkfc1:
+    image: bde2020/hadoop-base:2.0.0-hadoop3.2.1-java8
+    container_name: zkfc1
+    command: ["hdfs", "zkfc"]
+    networks:
+      - hadoopNet
+    depends_on:
+      - namenode1
+      - zookeeper1
+      - zookeeper2
+      - zookeeper3
+    volumes:
+      - ./conf:/etc/hadoop:ro
+
+
+  zkfc2:
+    image: bde2020/hadoop-base:2.0.0-hadoop3.2.1-java8
+    container_name: zkfc2
+    command: ["hdfs", "zkfc"]
+    networks:
+      - hadoopNet
+    depends_on:
+      - namenode2
+      - zookeeper1
+      - zookeeper2
+      - zookeeper3 
+    volumes:
+      - ./conf:/etc/hadoop:ro
+
   downloader:
     build:
       context: ./parquet-loader
@@ -51,5 +282,21 @@ services:
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
     depends_on:
-      - namenode
-      - datanode
+      - namenode1
+      - namenode2
+      - journalnode1
+      - journalnode2
+      - journalnode3  
+      - datanode1
+      - datanode2
+      - datanode3
+  
+  # debug:
+  #   image: busybox
+  #   command: ["ls", "-l", "/opt/hadoop/etc/hadoop"]
+  #   volumes:
+  #     - ./conf:/opt/hadoop/etc/hadoop:ro
+      
+networks:
+  hadoopNet : 
+    driver : bridge

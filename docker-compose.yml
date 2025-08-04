@@ -1,27 +1,4 @@
 services:
-  # spark-master:
-  #   image: apache/spark:3.3.1
-  #   environment:
-  #     - SPARK_MODE=master
-  #   ports:
-  #     - 8080:8080
-  #     - 7077:7077
-  #   command: ["/opt/spark/bin/spark-class", "org.apache.spark.deploy.master.Master"]
-  #   network_mode: "host"
-
-  # spark-worker:
-  #   image: apache/spark:3.3.1
-  #   environment:
-  #     - SPARK_MODE=worker
-  #     - SPARK_MASTER_URL=spark://localhost:7077
-  #   volumes:
-  #     - ./spark-worker-workdir:/opt/spark/work
-  #   command: ["/opt/spark/bin/spark-class", "org.apache.spark.deploy.worker.Worker", "spark://localhost:7077"]
-  #   depends_on:
-  #     - spark-master
-  #   network_mode: "host"
-
-
   spark-master:
     image: bde2020/spark-master:3.3.0-hadoop3.3
     container_name: spark-master

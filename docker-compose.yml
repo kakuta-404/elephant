@@ -119,5 +119,15 @@ services:
       - HDFS_CONF_dfs_replication=3
     networks: [bigdata]
 
+  loader:
+    build: 
+      context: ./loader
+    volumes:
+      - ./data:/data
+      - /var/run/docker.sock:/var/run/docker.sock
+    depends_on:
+      - namenode
+    networks: [bigdata]
+
 networks:
   bigdata: {}

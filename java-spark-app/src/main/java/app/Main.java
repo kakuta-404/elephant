@@ -13,11 +13,19 @@ public class Main {
                 .option("header", "true")
                 .parquet("hdfs://namenode:9000/data/taxi/yellow_tripdata_2025-01.parquet");
 
-        taxiData.createOrReplaceTempView("data");
+        Dataset<Row> zoneData = spark.read()
+            .format("csv")
+            .option("header", "true")
+            .load("hdfs://namenode:9000/data/taxi/taxi_zone_lookup.csv");
 
-        // Execute queries
-        MaxTipQuery.execute(taxiData);
+        // query 1
         DurationMinutesQuery.execute(taxiData);
+        // query 2
+        FarePriceByZone.execute(taxiData, zoneData);
+        // query 3
+        TotalAmountByBorough.execute(taxiData, zoneData);
+        // query 4
+        MaxTipQuery.execute(taxiData);
 
         spark.stop();
     }

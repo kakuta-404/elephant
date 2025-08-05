@@ -1,27 +1,38 @@
 package main
 
 import (
-	"fmt"
 	"log/slog"
 	"os/exec"
+	"path/filepath"
 )
 
 func main() {
-	var link string
+	uploadFile("../data/yellow_tripdata_2025-01.parquet", "/data/taxi/yellow_tripdata_2025-01.parquet")
+	uploadFile("../data/taxi_zone_lookup.csv", "/data/taxi/taxi_zone_lookup.csv")
+}
 
-	link = "https://d37ci6vzurychx.cloudfront.net/trip-data/yellow_tripdata_2025-01.parquet"
+func uploadFile(localFile string, hdfsPath string) {
+	containerTempPath := "/tmp/" + filepath.Base(localFile)
 
-	order := fmt.Sprintf("curl -sSL '%s' | hdfs dfs -put - /data/taxi/yellow_tripdata_2025-01.parquet", link)
-
-	cmd := exec.Command("docker", "exec", "-i", "namenode", "bash", "-c", order)
-
-	output, err := cmd.CombinedOutput()
-
-	if err != nil {
-		slog.Error("Command failed", "error", err, "output", string(output))
+	cpCmd := exec.Command("docker", "cp", localFile, "namenode:"+containerTempPath)
+	if output, err := cpCmd.CombinedOutput(); err != nil {
+		slog.Error("Failed to copy file to container",
+			"file", localFile, "error", err, "output", string(output))
 		return
 	}
 
-	slog.Info("Done", "output", string(output))
+	hdfsDir := filepath.Dir(hdfsPath)
+	putCmd := exec.Command("docker", "exec", "namenode", "bash", "-c",
+		"hdfs dfs -mkdir -p "+hdfsDir+" && hdfs dfs -put -f "+containerTempPath+" "+hdfsPath)
 
+	output, err := putCmd.CombinedOutput()
+	if err != nil {
+		slog.Error("Upload failed",
+			"file", localFile, "error", err, "output", string(output))
+		return
+	}
+
+	slog.Info("File uploaded successfully",
+		"file", localFile,
+		"hdfsPath", hdfsPath)
 }

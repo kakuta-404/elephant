@@ -19,7 +19,7 @@ services:
     ports: ["8080:8080","7077:7077"]
     volumes:
       - ./spark-conf:/opt/hadoop/etc/hadoop:ro
-      - ./java-spark-app/target/:/opt/spark-app
+      - ./java-spark-app/:/opt/spark-app
     networks: [bigdata]
     depends_on: [zookeeper]
 
@@ -35,7 +35,7 @@ services:
     ports: ["8081:8081","7078:7077"]
     volumes:
       - ./spark-conf:/opt/hadoop/etc/hadoop:ro
-      - ./java-spark-app/target/:/opt/spark-app
+      - ./java-spark-app/:/opt/spark-app
     networks: [bigdata]
     depends_on: [zookeeper]
 
